@@ -7,6 +7,8 @@ Supports authentication, SSL, and multiple hosts.
 
 from typing import Optional, Callable
 from dataclasses import dataclass
+
+from cassandra import ConsistencyLevel
 from cassandra.cluster import (
     Cluster,
     Session,
@@ -20,6 +22,7 @@ from cassandra.query import dict_factory, SimpleStatement
 import ssl
 
 from src.config.settings import ConnectionProfile
+from src.utils.ssl import ssl_protocol
 
 
 @dataclass
@@ -94,11 +97,15 @@ class CassandraConnectionManager:
             # Build SSL options if enabled
             ssl_context = None
             if profile.ssl_enabled:
-                ssl_context = ssl.create_default_context()
+                ssl_context = ssl.SSLContext(ssl_protocol(profile.ssl_protocol))
                 ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
+                if profile.ssl_cert_path:
+                    ssl_context.verify_mode = ssl.CERT_REQUIRED
+                    ssl_context.load_verify_locations(profile.ssl_cert_path)
+                else:
+                    ssl_context.verify_mode = ssl.CERT_NONE
 
-            # Create execution profile with dict factory for easier data handling
+                    # Create execution profile with dict factory for easier data handling
             exec_profile = ExecutionProfile(
                 load_balancing_policy=RoundRobinPolicy(),
                 row_factory=dict_factory
@@ -115,7 +122,10 @@ class CassandraConnectionManager:
             )
 
             # Connect to cluster
-            self._session = self._cluster.connect()
+            if profile.default_keyspace:
+                self._session = self._cluster.connect(profile.default_keyspace)
+            else:
+                self._session = self._cluster.connect()
             self._current_profile = profile
 
             # Set default keyspace if specified
@@ -237,11 +247,12 @@ class CassandraConnectionManager:
         if parameters:
             prepared = self._session.prepare(query)
             bound = prepared.bind(parameters)
+            bound.consistency_level = ConsistencyLevel.ONE
             if page_size:
                 bound.fetch_size = page_size
             return self._session.execute(bound, paging_state=paging_state)
         else:
-            statement = SimpleStatement(query)
+            statement = SimpleStatement(query, consistency_level=ConsistencyLevel.ONE)
             if page_size:
                 statement.fetch_size = page_size
             return self._session.execute(statement, paging_state=paging_state)

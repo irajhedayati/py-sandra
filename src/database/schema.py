@@ -6,7 +6,6 @@ Provides structured information about table schemas including
 partition keys, clustering keys, and column types.
 """
 
-from typing import Optional
 from dataclasses import dataclass, field
 from cassandra.cluster import Session
 
@@ -33,6 +32,12 @@ class TableSchema:
     keyspace: str
     table_name: str
     columns: list[ColumnInfo] = field(default_factory=list)
+
+    def column(self, name: str) -> ColumnInfo | None:
+        for c in self.columns:
+            if c.name == name:
+                return c
+        return None
 
     @property
     def partition_keys(self) -> list[ColumnInfo]:

@@ -7,8 +7,8 @@ Coordinates all components of the Cassandra GUI client:
 - Data browsing and CRUD operations
 """
 
-from typing import Dict, Any, List
 import re
+from typing import Dict, Any
 
 import pandas as pd
 import streamlit as st
@@ -16,9 +16,10 @@ import streamlit as st
 from src.config.settings import ConfigManager, ConnectionProfile
 from src.database.connection import CassandraConnectionManager
 from src.database.schema import SchemaInspector, TableSchema
+from src.utils.ssl import supported_ssl_protocols
 
 
-# noinspection SqlNoDataSourceInspection
+# noinspection SqlNoDataSourceInspection,PyTypeChecker
 class CassandraGUIApp:
     """
     Main application controller for Cassandra GUI Client.
@@ -80,9 +81,13 @@ class CassandraGUIApp:
             if self._connection.is_connected and st.session_state.schema_inspector:
                 st.divider()
                 st.header("Schema")
-                
+
                 keyspaces = st.session_state.schema_inspector.get_keyspaces()
-                selected_ks = st.selectbox("Keyspace", keyspaces, key="selected_keyspace")
+                if self._connection.current_profile.default_keyspace:
+                    idx = keyspaces.index(self._connection.current_profile.default_keyspace)
+                else:
+                    idx = 0
+                selected_ks = st.selectbox("Keyspace", keyspaces, index=idx, key="selected_keyspace")
                 
                 if selected_ks:
                     tables = st.session_state.schema_inspector.get_tables(selected_ks)
@@ -125,20 +130,70 @@ class CassandraGUIApp:
 
     def _render_connection_form(self):
         """Render form for adding/editing connections."""
+        
+        # Default values
+        defaults = {
+            "name": "",
+            "hosts": "127.0.0.1",
+            "port": 9042,
+            "username": "",
+            "password": "",
+            "default_keyspace": "system_cluster_metadata",
+            "ssl_enabled": False,
+            "ssl_protocol": supported_ssl_protocols[0] if supported_ssl_protocols else "PROTOCOL_TLS",
+            "ssl_cert_path": ""
+        }
+
+        # Load from selected connection if available
+        selected_conn_name = st.session_state.get("selected_connection")
+        if selected_conn_name and selected_conn_name != "Select...":
+            profile = self._config.get_connection(selected_conn_name)
+            if profile:
+                defaults["name"] = profile.name
+                defaults["hosts"] = ",".join(profile.hosts)
+                defaults["port"] = profile.port
+                defaults["username"] = profile.username or ""
+                defaults["password"] = profile.password or ""
+                defaults["default_keyspace"] = profile.default_keyspace or ""
+                defaults["ssl_enabled"] = profile.ssl_enabled
+                defaults["ssl_protocol"] = profile.ssl_protocol or defaults["ssl_protocol"]
+                defaults["ssl_cert_path"] = profile.ssl_cert_path or ""
+
+        # Use a suffix for keys to ensure form resets when selection changes
+        key_suffix = selected_conn_name if selected_conn_name else "new"
+
         with st.form("connection_form"):
-            name = st.text_input("Name")
-            hosts = st.text_input("Hosts (comma-separated)", "127.0.0.1")
-            port = st.number_input("Port", value=9042)
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
+            st.caption(f"Editing: {selected_conn_name}" if selected_conn_name and selected_conn_name != "Select..." else "New Connection")
             
+            name = st.text_input("Name", value=defaults["name"], key=f"conn_name_{key_suffix}")
+            hosts = st.text_input("Hosts (comma-separated)", value=defaults["hosts"], key=f"conn_hosts_{key_suffix}")
+            port = st.number_input("Port", value=defaults["port"], key=f"conn_port_{key_suffix}")
+            username = st.text_input("Username", value=defaults["username"], key=f"conn_user_{key_suffix}")
+            password = st.text_input("Password", value=defaults["password"], type="password", key=f"conn_pass_{key_suffix}")
+            default_keyspace = st.text_input("Default Keyspace", value=defaults["default_keyspace"], key=f"conn_ks_{key_suffix}")
+            
+            # SSL
+            ssl_enabled = st.checkbox("SSL Enabled", value=defaults["ssl_enabled"], key=f"conn_ssl_{key_suffix}")
+            
+            try:
+                proto_index = supported_ssl_protocols.index(defaults["ssl_protocol"])
+            except ValueError:
+                proto_index = 0
+                
+            ssl_protocol = st.selectbox("SSL Protocol", supported_ssl_protocols, index=proto_index, key=f"conn_proto_{key_suffix}")
+            ssl_cert_path = st.text_input("SSL certificate file if required", value=defaults["ssl_cert_path"], key=f"conn_cert_{key_suffix}")
+
             if st.form_submit_button("Save Connection"):
                 profile = ConnectionProfile(
                     name=name,
                     hosts=[h.strip() for h in hosts.split(",")],
                     port=port,
                     username=username if username else None,
-                    password=password if password else None
+                    password=password if password else None,
+                    ssl_enabled=ssl_enabled,
+                    ssl_protocol=ssl_protocol if ssl_protocol else None,
+                    ssl_cert_path=ssl_cert_path if ssl_cert_path else None,
+                    default_keyspace=default_keyspace
                 )
                 self._config.add_connection(profile)
                 st.success(f"Saved connection '{name}'")
@@ -183,17 +238,8 @@ class CassandraGUIApp:
                 val = cols[i % 3].text_input(f"Filter {col.name}")
                 if val:
                     filter_params[col.name] = val
-
-        # Pagination Controls
-        col1, col2, col3 = st.columns([1, 1, 4])
-        page_size = col1.selectbox("Rows per page", [10, 25, 50], index=0, key="page_size_selector")
+        page_size = st.selectbox("Rows per page", [10, 25, 50], index=0, key="page_size_selector")
         
-        # Initialize pagination state if needed
-        if 'paging_state' not in st.session_state:
-            st.session_state.paging_state = None
-        if 'page_history' not in st.session_state:
-            st.session_state.page_history = []
-
         # Query Data
         query = f"SELECT * FROM {schema.keyspace}.{schema.table_name}"
         
@@ -205,46 +251,23 @@ class CassandraGUIApp:
             st.session_state.page_history = []
 
         if filter_params:
-            where_clauses = [f"{k} = %s" for k in filter_params.keys()]
-            query += " WHERE " + " AND ".join(where_clauses) + " ALLOW FILTERING"
+            where_clauses = []
+            for k, v in filter_params.items():
+                # "text"
+                if schema.column(k).cql_type == "text":
+                    where_clauses.append(f"{k} = '{v}'")
+                else:
+                # "int", "bigint", "float", "double", "uuid", "boolean", "timestamp"
+                    where_clauses.append(f"{k} = {v}")
+            query += " WHERE " + " AND ".join(where_clauses) + " LIMIT " + str(page_size) + " ALLOW FILTERING"
             # Note: In a real app, handle type conversion for params
-            rows = self._connection.execute(
-                query, 
-                tuple(filter_params.values()), 
-                page_size=page_size, 
-                paging_state=st.session_state.paging_state
-            )
+            rows = self._connection.execute(query,)
         else:
-            rows = self._connection.execute(
-                query, 
-                page_size=page_size, 
-                paging_state=st.session_state.paging_state
-            )
+            rows = self._connection.execute(query + " LIMIT " + str(page_size))
 
         # Display Data
         data = list(rows)
         
-        # Pagination Buttons
-        prev_col, next_col = col2.columns(2)
-        
-        # Previous Button
-        if st.session_state.page_history:
-            if prev_col.button("Previous"):
-                # Pop current state (which we just used) and the previous one to go back
-                st.session_state.paging_state = st.session_state.page_history.pop()
-                st.rerun()
-        else:
-            prev_col.button("Previous", disabled=True)
-
-        # Next Button
-        if rows.has_more_pages:
-            if next_col.button("Next"):
-                st.session_state.page_history.append(st.session_state.paging_state)
-                st.session_state.paging_state = rows.paging_state
-                st.rerun()
-        else:
-            next_col.button("Next", disabled=True)
-
         if data:
             # Custom grid rendering to support row actions
             st.write("### Data")
@@ -277,7 +300,8 @@ class CassandraGUIApp:
         else:
             st.info("No data found.")
 
-    def _confirm_delete(self, schema: TableSchema, row: Any):
+    @staticmethod
+    def _confirm_delete(schema: TableSchema, row: Any):
         """Show confirmation dialog for deletion."""
         st.session_state.delete_target = {
             'schema': schema,

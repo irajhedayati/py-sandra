@@ -20,6 +20,8 @@ class ConnectionProfile:
     username: str = ""
     password: str = ""
     ssl_enabled: bool = False
+    ssl_protocol: str = "PROTOCOL_TLS"
+    ssl_cert_path: str = ""
     default_keyspace: str = ""
 
     def to_dict(self) -> dict:
@@ -69,7 +71,7 @@ class ConfigManager:
     Directories are created automatically if they don't exist.
     """
 
-    CONFIG_DIR_NAME = ".cassandra_gui"
+    CONFIG_DIR_NAME = ".py-sandra"
     CONFIG_FILE_NAME = "config.json"
 
     def __init__(self):

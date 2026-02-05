@@ -43,9 +43,9 @@ A modern, web-based graphical client for Apache Cassandra built with Python and 
 
 2.  **Create a virtual environment and install dependencies:**
     ```bash
-    uv venv
+    uv venv --python 3.12
     source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-    uv pip install -e .
+    uv sync
     ```
 
 3.  **Run the application:**
@@ -88,16 +88,6 @@ A modern, web-based graphical client for Apache Cassandra built with Python and 
 ## Contributing
 
 We welcome contributions! Whether it's reporting bugs, suggesting features, or submitting pull requests, your help is appreciated.
-
-1.  Fork the repository.
-2.  Create a feature branch (`git checkout -b feature/amazing-feature`).
-3.  Commit your changes (`git commit -m 'Add amazing feature'`).
-4.  Push to the branch (`git push origin feature/amazing-feature`).
-5.  Open a Pull Request.
-
-## Credits
-
-Developed by **Iraj** with the assistance of AI.
 
 ## License
 
