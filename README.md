@@ -1,32 +1,104 @@
-# Cassandra GUI Client
+# py-sandra: Cassandra GUI Client
 
-A graphical desktop client for Apache Cassandra with full schema-driven CRUD support.
+A modern, web-based graphical client for Apache Cassandra built with Python and Streamlit. It provides full schema-driven CRUD support, schema introspection, and a CQL editor.
 
-## Requirements
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![Streamlit](https://img.shields.io/badge/streamlit-1.30%2B-red)
 
-- Python 3.9+
-- Apache Cassandra 3.x or 4.x
+## Features
 
-## Installation
+*   **Connection Management**: Manage multiple Cassandra connection profiles with support for authentication and SSL.
+*   **Schema Navigation**: Browse keyspaces and tables dynamically.
+*   **Data Browser**:
+    *   View table data with pagination (10, 25, 50 rows).
+    *   Filter data by partition keys.
+    *   Delete rows directly from the grid.
+    *   Hide specific columns (e.g., large maps) via configuration.
+*   **CRUD Operations**:
+    *   Insert new records with auto-generated forms based on table schema.
+    *   Delete records safely with confirmation.
+*   **Schema Tools**:
+    *   View detailed table schema (partition keys, clustering keys, types).
+    *   **Map Schema Editor**: Define fixed schemas for `MAP` columns to validate and manage key-value pairs easily.
+*   **CQL Editor**:
+    *   Run arbitrary CQL queries.
+    *   **Extended Mode**: View results in a stacked format (like `cqlsh` extended output), automatically limited to 10 records.
 
-1. Create virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-Install dependencies:
+## Quickstart
 
-pip install -r requirements.txt
-Run the application:
+### Prerequisites
 
-python main.py
+*   Python 3.12+
+*   Apache Cassandra 3.x or 4.x
+*   [uv](https://github.com/astral-sh/uv) (fast Python package installer)
 
-Configuration
-Configuration is stored in ~/.cassandra_gui/config.json and is created automatically on first run.
+### Installation
 
-Features
-Multiple connection profiles
-Keyspace and table discovery
-Schema-driven dynamic forms
-Paginated data browsing
-Partition key filtering
-Insert, update, and delete operations
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/yourusername/py-sandra.git
+    cd py-sandra
+    ```
+
+2.  **Create a virtual environment and install dependencies:**
+    ```bash
+    uv venv
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    uv pip install -e .
+    ```
+
+3.  **Run the application:**
+    ```bash
+    streamlit run main.py
+    ```
+
+    The application will open in your default web browser at `http://localhost:8501`.
+
+## User Manual
+
+### 1. Connecting to a Cluster
+*   On the sidebar, expand **Manage Connections**.
+*   Enter a name, host IPs (comma-separated), port (default 9042), and optional credentials.
+*   Click **Save Connection**.
+*   Select the connection from the dropdown and click **Connect**.
+
+### 2. Browsing Data
+*   Once connected, select a **Keyspace** and **Table** from the sidebar.
+*   The **Data Browser** tab shows the table data.
+*   Use the **Filters** expander to filter by specific column values (supports partition keys).
+*   Use the pagination controls at the bottom to navigate large datasets.
+*   Click the trash icon (🗑️) to delete a row.
+
+### 3. Inserting Data
+*   Switch to the **Insert Record** tab.
+*   Fill in the form fields generated from the table schema.
+*   Click **Insert** to add the record.
+
+### 4. Managing Schema & Metadata
+*   Switch to the **Table Info** tab to view column details.
+*   **Hide Columns**: Check the "Hide" box to prevent a column from appearing in the Data Browser.
+*   **Map Schemas**: For `MAP` columns, click **Edit Schema** to define a fixed set of keys and their types. This is useful for maps that act as structured documents.
+
+### 5. Running CQL Queries
+*   Switch to the **CQL Editor** tab.
+*   Type your query.
+*   Check **Extended Mode** to view results in a vertical, key-value format (useful for wide rows).
+
+## Contributing
+
+We welcome contributions! Whether it's reporting bugs, suggesting features, or submitting pull requests, your help is appreciated.
+
+1.  Fork the repository.
+2.  Create a feature branch (`git checkout -b feature/amazing-feature`).
+3.  Commit your changes (`git commit -m 'Add amazing feature'`).
+4.  Push to the branch (`git push origin feature/amazing-feature`).
+5.  Open a Pull Request.
+
+## Credits
+
+Developed by **Iraj** with the assistance of AI.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

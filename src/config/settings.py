@@ -7,7 +7,7 @@ in the user's home directory. Auto-creates directories if missing.
 
 import json
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, asdict, field
 
 
@@ -36,8 +36,8 @@ class AppSettings:
     connections: list[ConnectionProfile] = field(default_factory=list)
     last_connection_name: str = ""
     window_geometry: dict = field(default_factory=dict)
-    # Stores metadata per table: "keyspace.table" -> {"column_name": {"hide": bool}}
-    table_metadata: Dict[str, Dict[str, Dict[str, bool]]] = field(default_factory=dict)
+    # Stores metadata per table: "keyspace.table" -> {"column_name": {"hide": bool, "map_schema": [...]}}
+    table_metadata: Dict[str, Dict[str, Dict[str, Any]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -164,7 +164,7 @@ class ConfigManager:
         table_meta = self._settings.table_metadata.get(key, {})
         return table_meta.get(column, {})
 
-    def set_column_metadata(self, keyspace: str, table: str, column: str, key: str, value: bool) -> None:
+    def set_column_metadata(self, keyspace: str, table: str, column: str, key: str, value: Any) -> None:
         """Set a metadata value for a column."""
         if not self._settings:
             self._settings = AppSettings()

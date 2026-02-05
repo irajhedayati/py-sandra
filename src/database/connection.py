@@ -16,7 +16,7 @@ from cassandra.cluster import (
 )
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.policies import RoundRobinPolicy
-from cassandra.query import dict_factory
+from cassandra.query import dict_factory, SimpleStatement
 import ssl
 
 from src.config.settings import ConnectionProfile
@@ -218,13 +218,15 @@ class CassandraConnectionManager:
             self._session.set_keyspace(keyspace)
             self._current_keyspace = keyspace
 
-    def execute(self, query: str, parameters: tuple = None):
+    def execute(self, query: str, parameters: tuple = None, page_size: int = None, paging_state: bytes = None):
         """
         Execute a CQL query.
 
         Args:
             query: CQL query string.
             parameters: Optional tuple of parameters for prepared statement.
+            page_size: Number of rows to fetch (fetch_size).
+            paging_state: State string to resume pagination.
 
         Returns:
             Query result set.
@@ -234,6 +236,12 @@ class CassandraConnectionManager:
 
         if parameters:
             prepared = self._session.prepare(query)
-            return self._session.execute(prepared, parameters)
+            bound = prepared.bind(parameters)
+            if page_size:
+                bound.fetch_size = page_size
+            return self._session.execute(bound, paging_state=paging_state)
         else:
-            return self._session.execute(query)
+            statement = SimpleStatement(query)
+            if page_size:
+                statement.fetch_size = page_size
+            return self._session.execute(statement, paging_state=paging_state)
