@@ -13,6 +13,7 @@ from typing import Dict, Any
 
 import pandas as pd
 import streamlit as st
+from cassandra.util import OrderedMapSerializedKey
 
 from src.config.settings import ConfigManager, ConnectionProfile
 from src.database.connection import CassandraConnectionManager
@@ -377,31 +378,37 @@ class CassandraGUIApp:
                         elif col.cql_type == 'boolean':
                             updated_data[col.name] = st.checkbox(f"{col.name} ({col.cql_type})", value=bool(val) if val is not None else False, disabled=col.is_primary_key)
                         elif col.cql_type.startswith('map<'):
-                            # Handle Map types
-                            meta = self._config.get_column_metadata(schema.keyspace, schema.table_name, col.name)
-                            map_schema = meta.get("map_schema", [])
-                            
-                            if map_schema and isinstance(val, dict):
-                                # Use defined schema as hint
-                                formatted_map = {}
-                                for item in map_schema:
-                                    key = item['key']
-                                    if key in val:
-                                        formatted_map[key] = val[key]
-                                
-                                # Add remaining keys not in schema
-                                for map_k, map_v in val.items():
-                                    if map_k not in formatted_map:
-                                        formatted_map[map_k] = map_v
-                                        
-                                display_value = json.dumps(formatted_map, indent=2, default=str)
-                            elif isinstance(val, dict):
-                                # No schema, just format as JSON
-                                display_value = json.dumps(val, indent=2, default=str)
-                            else:
-                                display_value = str(val) if val is not None else "{}"
+                            with st.expander(f"{col.name} ({col.cql_type})"):
+                                # Handle Map types
+                                updated_data[col.name] = {}
+                                meta = self._config.get_column_metadata(schema.keyspace, schema.table_name, col.name)
+                                map_schema = dict([(item['key'],item['type']) for item in meta.get("map_schema", [])])
+                                if map_schema:
+                                    for map_k, map_v in val.items():
+                                        if map_k in map_schema:
+                                            map_v_type = map_schema[map_k]
+                                            if map_v_type in ('int', 'bigint', 'varint', 'smallint', 'tinyint',
+                                                                     'counter'):
+                                                updated_data[col.name][map_k] = st.number_input(f"{map_k} ({map_v_type})",
+                                                                                         value=int(map_v) if map_v is not None else 0)
+                                            elif map_v_type in ('float', 'double', 'decimal'):
+                                                updated_data[col.name][map_k] = st.number_input(f"{map_k} ({map_v_type})",
+                                                                                                value=float(map_v) if map_v is not None else 0.0)
+                                            elif map_v_type == 'boolean':
+                                                updated_data[col.name][map_k] = st.checkbox(f"{map_k} ({map_v_type})",
+                                                                                            value=bool(map_v) if map_v is not None else False)
+                                            else:
+                                                updated_data[col.name][map_k] = st.text_input(f"{map_k} ({map_v_type})",
+                                                                                              value=str(map_v) if map_v is not None else "")
+                                        else:
+                                            updated_data[col.name][map_k] = st.text_input(f"{map_k} (text)",
+                                                                                          value=str(map_v) if map_v is not None else "")
+                                else:
+                                    display_value = json.dumps(val, indent=2)
+                                    updated_data[col.name] = st.text_area(f"{col.name} ({col.cql_type})",
+                                                                          value=display_value,
+                                                                          height=150)
 
-                            updated_data[col.name] = st.text_area(f"{col.name} ({col.cql_type})", value=display_value, height=150, disabled=col.is_primary_key)
                         else:
                             # Default to text input
                             updated_data[col.name] = st.text_input(f"{col.name} ({col.cql_type})", value=str(val) if val is not None else "", disabled=col.is_primary_key)
