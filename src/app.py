@@ -7,6 +7,7 @@ Coordinates all components of the Cassandra GUI client:
 - Data browsing and CRUD operations
 """
 
+import json
 import re
 from typing import Dict, Any
 
@@ -46,6 +47,7 @@ class CassandraGUIApp:
         self._render_sidebar()
         self._render_main_content()
         self._render_delete_confirmation()
+        self._render_row_details()
         self._render_map_schema_editor()
 
     def _render_sidebar(self):
@@ -84,7 +86,10 @@ class CassandraGUIApp:
 
                 keyspaces = st.session_state.schema_inspector.get_keyspaces()
                 if self._connection.current_profile.default_keyspace:
-                    idx = keyspaces.index(self._connection.current_profile.default_keyspace)
+                    try:
+                        idx = keyspaces.index(self._connection.current_profile.default_keyspace)
+                    except ValueError:
+                        idx = 0
                 else:
                     idx = 0
                 selected_ks = st.selectbox("Keyspace", keyspaces, index=idx, key="selected_keyspace")
@@ -272,8 +277,11 @@ class CassandraGUIApp:
             # Custom grid rendering to support row actions
             st.write("### Data")
             
-            # Calculate column widths: 1 for actions, 2 for each visible data column
-            col_spec = [0.5] + [1] * len(visible_columns)
+            # Calculate column widths: 150px for actions, rest flexible
+            # Streamlit doesn't support exact pixel widths in st.columns easily, 
+            # but we can use a small ratio for the first column.
+            # Assuming a wide layout, 0.15 vs 1 is roughly 1:7 ratio.
+            col_spec = [0.4] + [1] * len(visible_columns)
             cols = st.columns(col_spec)
             
             # Header
@@ -286,8 +294,16 @@ class CassandraGUIApp:
             for i, row in enumerate(data):
                 cols = st.columns(col_spec)
                 
+                # Actions Column
+                action_col = cols[0]
+                ac1, ac2 = action_col.columns(2)
+                
+                # View Details Action
+                if ac1.button("View", key=f"view_{i}", help="View Details"):
+                    self._show_row_details(row)
+
                 # Delete Action
-                if cols[0].button("🗑️", key=f"del_{i}", help="Delete Row"):
+                if ac2.button("Delete", key=f"del_{i}", help="Delete Row"):
                     self._confirm_delete(schema, row)
                 
                 # Data
@@ -330,6 +346,120 @@ class CassandraGUIApp:
                 if col2.button("Cancel"):
                     del st.session_state.delete_target
                     st.rerun()
+
+    @staticmethod
+    def _show_row_details(row: Any):
+        """Set state to show row details dialog."""
+        st.session_state.view_details_target = row
+        st.rerun()
+
+    def _render_row_details(self):
+        """Render row details dialog if needed."""
+        if 'view_details_target' in st.session_state:
+            row = st.session_state.view_details_target
+            schema = st.session_state.current_table_schema
+            
+            with st.container():
+                st.markdown("---")
+                st.subheader("Edit Row Details")
+                
+                with st.form("edit_row_form"):
+                    updated_data = {}
+                    
+                    for col in schema.all_columns_sorted:
+                        val = row.get(col.name)
+                        
+                        # Determine input type based on CQL type
+                        if col.cql_type in ('int', 'bigint', 'varint', 'smallint', 'tinyint', 'counter'):
+                            updated_data[col.name] = st.number_input(f"{col.name} ({col.cql_type})", value=int(val) if val is not None else 0, disabled=col.is_primary_key)
+                        elif col.cql_type in ('float', 'double', 'decimal'):
+                            updated_data[col.name] = st.number_input(f"{col.name} ({col.cql_type})", value=float(val) if val is not None else 0.0, disabled=col.is_primary_key)
+                        elif col.cql_type == 'boolean':
+                            updated_data[col.name] = st.checkbox(f"{col.name} ({col.cql_type})", value=bool(val) if val is not None else False, disabled=col.is_primary_key)
+                        elif col.cql_type.startswith('map<'):
+                            # Handle Map types
+                            meta = self._config.get_column_metadata(schema.keyspace, schema.table_name, col.name)
+                            map_schema = meta.get("map_schema", [])
+                            
+                            if map_schema and isinstance(val, dict):
+                                # Use defined schema as hint
+                                formatted_map = {}
+                                for item in map_schema:
+                                    key = item['key']
+                                    if key in val:
+                                        formatted_map[key] = val[key]
+                                
+                                # Add remaining keys not in schema
+                                for map_k, map_v in val.items():
+                                    if map_k not in formatted_map:
+                                        formatted_map[map_k] = map_v
+                                        
+                                display_value = json.dumps(formatted_map, indent=2, default=str)
+                            elif isinstance(val, dict):
+                                # No schema, just format as JSON
+                                display_value = json.dumps(val, indent=2, default=str)
+                            else:
+                                display_value = str(val) if val is not None else "{}"
+
+                            updated_data[col.name] = st.text_area(f"{col.name} ({col.cql_type})", value=display_value, height=150, disabled=col.is_primary_key)
+                        else:
+                            # Default to text input
+                            updated_data[col.name] = st.text_input(f"{col.name} ({col.cql_type})", value=str(val) if val is not None else "", disabled=col.is_primary_key)
+
+                    col1, col2 = st.columns([1, 5])
+                    if col1.form_submit_button("Save Changes", type="primary"):
+                        self._update_record(schema, row, updated_data)
+                        del st.session_state.view_details_target
+                        st.rerun()
+                    
+                    if col2.form_submit_button("Cancel"):
+                        del st.session_state.view_details_target
+                        st.rerun()
+                st.markdown("---")
+
+    def _update_record(self, schema: TableSchema, original_row: Any, updated_data: Dict[str, Any]):
+        """Update a record."""
+        keyspace = schema.keyspace
+        table = schema.table_name
+        
+        # Build SET clause
+        set_parts = []
+        set_values = []
+        
+        for col in schema.regular_columns:
+            new_val = updated_data.get(col.name)
+            
+            # Handle Map types conversion back from JSON string
+            if col.cql_type.startswith('map<'):
+                try:
+                    if isinstance(new_val, str):
+                        new_val = json.loads(new_val)
+                except json.JSONDecodeError:
+                    st.error(f"Invalid JSON for column {col.name}")
+                    return
+
+            set_parts.append(f"{col.name} = %s")
+            set_values.append(new_val)
+            
+        # Build WHERE clause using primary key from original row
+        where_parts = []
+        where_values = []
+        for col in schema.primary_key_columns:
+            val = original_row.get(col.name)
+            where_parts.append(f"{col.name} = %s")
+            where_values.append(val)
+            
+        if not set_parts:
+            st.warning("No columns to update.")
+            return
+
+        query = f"UPDATE {keyspace}.{table} SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}"
+        
+        try:
+            self._connection.execute(query, tuple(set_values + where_values))
+            st.success("Record updated successfully")
+        except Exception as e:
+            st.error(f"Update failed: {str(e)}")
 
     def _delete_record(self, schema: TableSchema, row: Any):
         """Delete a record."""

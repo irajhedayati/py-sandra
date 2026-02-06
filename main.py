@@ -15,7 +15,9 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-
+    st.write(
+        '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css"/>',
+        unsafe_allow_html=True)
     app = CassandraGUIApp()
     app.run()
 
