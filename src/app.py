@@ -13,7 +13,6 @@ from typing import Dict, Any
 
 import pandas as pd
 import streamlit as st
-from cassandra.util import OrderedMapSerializedKey
 
 from src.config.settings import ConfigManager, ConnectionProfile
 from src.database.connection import CassandraConnectionManager
